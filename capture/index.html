@@ -1,0 +1,171 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="UTF-8">
+    <meta http-equiv="X-UA-Compatible" content="IE=edge">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <meta http-equiv="Content-Type" content="text/html; charset=UTF-8">
+    <title>Security Camera</title>
+    <script type="text/javascript">
+        const SAVE_INTERVAL_SEC = 10;
+        const RELOAD_INTERVAL_SEC = 10 * 60;
+
+        function pad(number) {
+            if (number < 10) {
+                return '0' + number;
+            }
+            return number;
+        }
+
+        function formatDate(date) {
+            return date.getFullYear() +
+                '' + pad(date.getMonth() + 1) +
+                '' + pad(date.getDate()) +
+                '' + pad(date.getHours()) +
+                '' + pad(date.getMinutes()) +
+                '' + pad(date.getSeconds()) +
+                '' + (date.getMilliseconds() / 1000).toFixed(3).slice(2, 5);
+        }
+
+        document.addEventListener('DOMContentLoaded', function () {
+            navigator.getUserMedia(
+                {
+                    audio: true, video: true
+                },
+                function (stream) {
+                    var mediaRecorder;
+                    var video = document.querySelector('video');
+                    video.srcObject = stream
+                    var mimeTypes = [
+                        'video/webm; codecs=vp9',
+                        'video/webm; codecs=vp8',
+                        'video/webm',
+                        '',
+                    ];
+                    for (var mimeIndex = 0; mimeIndex < mimeTypes.length - 1; ++mimeIndex) {
+                        var options = {mimeType: mimeTypes[mimeIndex]};
+                        if (MediaRecorder.isTypeSupported(options.mimeType)) {
+                            break;
+                        }
+                    }
+                    var blobs = [];
+                    var startedAt = new Date();
+                    var videoFileName = formatDate(startedAt) + ".webm";
+                    var thumbnailFileName = formatDate(startedAt) + ".jpg";
+                    var thumbnailTaken = false;
+
+                    function sendBlob() {
+                        if (blobs.length > 0) {
+                            var formData = new FormData();
+                            formData.append("file", blobs[0], videoFileName);
+                            fetch('store.php', {
+                                method: 'POST',
+                                body: formData
+                            }).then(function (response) {
+                                document.querySelector('#resultDescription').textContent
+                                    = new Date().toLocaleString()
+                                    + " " + blobs[0].size
+                                    + " " + response.status;
+                                if (!response.ok) {
+                                    return;
+                                }
+                                blobs.shift();
+                                sendBlob();
+                            }).catch(function (error) {
+                                document.querySelector('#resultDescription').textContent
+                                    = new Date().toLocaleString()
+                                    + " " + blobs[0].size
+                                    + " " + error;
+                            }).finally(function () {
+                                if (mediaRecorder.state != 'recording') {
+                                    location.reload();
+                                }
+                            });
+                        }
+                    }
+
+                    mediaRecorder = new MediaRecorder(stream, {mimeType: mimeTypes[mimeIndex]});
+                    mediaRecorder.ondataavailable = function (event) {
+                        if (!thumbnailTaken) {
+                            var canvas = document.createElement('canvas');
+                            canvas.setAttribute('width', video.videoWidth);
+                            canvas.setAttribute('height', video.videoHeight);
+                            var context = canvas.getContext('2d');
+                            context.drawImage(video, 0, 0, video.videoWidth, video.videoHeight);
+                            canvas.toBlob(function (blob) {
+                                var formData = new FormData();
+                                formData.append("file", blob, thumbnailFileName);
+                                fetch('store.php', {
+                                    method: 'POST',
+                                    body: formData
+                                }).then(function (response) {
+                                    if (!response.ok) {
+                                        console.log("failed to upload thumbnail: " + response.status);
+                                        return;
+                                    }
+                                    thumbnailTaken = true;
+                                }).catch(function (error) {
+                                    console.log(error);
+                                });
+                            }, "image/jpeg", 0.8);
+                        }
+                        document.querySelector('#formatDescription').textContent
+                            = videoFileName
+                            + " " + mimeTypes[mimeIndex]
+                            + " " + video.videoWidth + "x" + video.videoHeight;
+                        if (event.data.size > 0) {
+                            blobs.push(event.data);
+                        }
+                        sendBlob();
+                    };
+                    mediaRecorder.start(SAVE_INTERVAL_SEC * 1000);
+                    window.setTimeout(function () {
+                        mediaRecorder.stop();
+                    }, RELOAD_INTERVAL_SEC * 1000);
+                },
+                function (error) {
+                    document.querySelector('#formatDescription').textContent = JSON.stringify(error);
+                }
+            );
+            var language = (window.navigator.languages && window.navigator.languages[0]) ||
+                window.navigator.language ||
+                window.navigator.userLanguage ||
+                window.navigator.browserLanguage;
+            var text = "Security Camera";
+            if (language.startsWith('ja')) {
+                text = "防犯カメラ作動中";
+            }
+            document.querySelector('h1').textContent = text;
+        });
+    </script>
+    <style type="text/css">
+        body {
+            margin: 0;
+            padding: 0;
+            color: #ffffff;
+            background-color: #000000;
+            font-family: sans-serif;
+        }
+
+        h1 {
+            margin: 0;
+            padding: 0;
+            font-size: 4em;
+            text-align: center;
+        }
+
+        video {
+            display: block;
+            margin: 0 auto;
+            width: 100%;
+            height: calc(100vh - 15em);
+        }
+    </style>
+</head>
+<body>
+<h1></h1>
+<video playsinline autoplay muted></video>
+<div id="formatDescription"></div>
+<div id="resultDescription"></div>
+</body>
+</html>
